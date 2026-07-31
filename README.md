@@ -259,6 +259,28 @@ nothing escapes it untyped — an unrecognised message (including one a future
 library version invents) becomes `verification_failed`, never an uncaught throw
 your framework renders as a 500.
 
+#### Three codes are true internally and redacted on the wire
+
+Each one answers a question about a credential this server holds, for a caller
+who has not authenticated:
+
+| `error.code` | What it would reveal | `toJSON()` sends |
+|---|---|---|
+| `unknown_credential` | "no such credential here" | `verification_failed` |
+| `user_handle_mismatch` | "it exists, but not for this account" | `verification_failed` |
+| `counter_regressed` | "it exists and we think it was cloned" | `verification_failed` |
+
+All four share one status (401) and one message, so there is nothing left to
+compare. Matching messages alone would not have been enough: `code` is the field
+a client branches on, and a distinct code is just as good an oracle as a
+distinct message.
+
+`PasskeyError.code` keeps the **precise** value, so your logs and metrics still
+see the real answer, and `credentials.flagCloned()` still runs. `wireCode`
+tells you what will actually be sent. Only `toJSON()` redacts. Tell the user
+about a suspected clone through a channel that has actually identified them; a
+login error is readable by a stranger.
+
 ### What is *not* closed
 
 **User-enumeration timing.** `POST /login/options` for an unknown email returns

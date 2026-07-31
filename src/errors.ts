@@ -60,6 +60,33 @@ const MESSAGES: Record<PasskeyErrorCode, string> = {
   not_supported: "That passkey operation is not supported.",
 };
 
+/**
+ * Codes that are TRUE internally and REDACTED on the wire.
+ *
+ * Matching messages and statuses are not enough on their own: a distinct
+ * `code` is just as good an oracle as a distinct message, and it is the field a
+ * client actually branches on. Each of these three says something about a
+ * credential the server holds —
+ *
+ * - `unknown_credential` — "no such credential here"
+ * - `user_handle_mismatch` — "that credential exists, but not for this account"
+ * - `counter_regressed` — "that credential exists and we think it was cloned"
+ *
+ * — and an unauthenticated caller has no business learning any of it. All three
+ * are indistinguishable from a bad signature once they cross the wire.
+ *
+ * `code` keeps the precise value for logs, events, and metrics; only
+ * {@link PasskeyError.toJSON} redacts. A clone detection still fires its event
+ * and still flags the credential — the app tells the user through a channel
+ * that has actually identified them, not through a login error a stranger can
+ * read.
+ */
+const WIRE_CODE: Partial<Record<PasskeyErrorCode, PasskeyErrorCode>> = {
+  unknown_credential: "verification_failed",
+  user_handle_mismatch: "verification_failed",
+  counter_regressed: "verification_failed",
+};
+
 /** Optional extras when constructing a {@link PasskeyError}. */
 export interface PasskeyErrorOptions {
   /**
@@ -100,9 +127,28 @@ export class PasskeyError extends Error {
     this.httpStatus = HTTP_STATUS[code];
   }
 
-  /** The wire body. This is the ONLY shape an error leaves the server as. */
+  /**
+   * The code a client is allowed to see — `code`, except where {@link WIRE_CODE}
+   * redacts it. Use this anywhere a value crosses the wire; use `code` for
+   * logs, events, and metrics.
+   */
+  get wireCode(): PasskeyErrorCode {
+    return WIRE_CODE[this.code] ?? this.code;
+  }
+
+  /**
+   * The wire body. This is the ONLY shape an error leaves the server as.
+   *
+   * When the code is redacted the message is taken from the table for the
+   * REDACTED code rather than from `this.message` — redacting the code and
+   * leaving a message that still names the real failure would redact nothing.
+   * All four codes involved answer 401, so `httpStatus` is not an oracle
+   * either; `errors.test.ts` pins that.
+   */
   toJSON(): { error: { code: PasskeyErrorCode; message: string } } {
-    return { error: { code: this.code, message: this.message } };
+    const code = this.wireCode;
+    const message = code === this.code ? this.message : MESSAGES[code];
+    return { error: { code, message } };
   }
 
   static challengeExpired(options?: PasskeyErrorOptions): PasskeyError {

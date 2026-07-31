@@ -53,6 +53,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+- **Three codes are true internally and redacted on the wire.**
+  `unknown_credential`, `user_handle_mismatch`, and `counter_regressed` all
+  reach the client as `verification_failed`, with the same message and the same
+  401. Matching messages alone were not enough: `code` is the field a client
+  branches on, so a distinct code is just as good a credential-existence oracle
+  as a distinct message. `PasskeyError.code` keeps the precise value for logs
+  and metrics; only `toJSON()` redacts, and `wireCode` exposes what will
+  actually be sent.
 - Challenges are 32 CSPRNG bytes, single-use, and **consumed before
   verification** — `ChallengeStore.pull()` deletes as it reads, so a replayed
   response fails at "no such challenge" no matter how valid its signature is.

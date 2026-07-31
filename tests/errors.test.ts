@@ -81,6 +81,48 @@ describe("PasskeyError", () => {
     expect(unknown.toJSON().error.message).toBe(failed.toJSON().error.message);
   });
 
+  // Matching messages are not enough. `code` is the field a client actually
+  // branches on, so a distinct code is just as good an oracle as a distinct
+  // message. Each of these three reveals something about a credential the
+  // server holds, and all three must arrive as `verification_failed`.
+  it.each([
+    ["unknown_credential", "no such credential here"],
+    ["user_handle_mismatch", "it exists, but not for this account"],
+    ["counter_regressed", "it exists and we think it was cloned"],
+  ] as const)("redacts %s on the wire (it would otherwise tell a stranger: %s)", (code, _leak) => {
+    const error = new PasskeyError(code);
+    const failed = new PasskeyError("verification_failed");
+
+    // True internally — logs, events and metrics still get the real answer.
+    expect(error.code).toBe(code);
+
+    // Redacted on the way out, in all three observable fields at once.
+    expect(error.wireCode).toBe("verification_failed");
+    expect(error.toJSON()).toEqual(failed.toJSON());
+    expect(error.httpStatus).toBe(failed.httpStatus);
+  });
+
+  it("redacts the message too when it redacts the code", () => {
+    // Redacting the code while leaving a message that still names the real
+    // failure would redact nothing at all.
+    const error = new PasskeyError("counter_regressed");
+
+    expect(error.message).toContain("cloned");
+    expect(error.toJSON().error.message).not.toContain("cloned");
+  });
+
+  it("leaves every non-redacted code exactly as it is", () => {
+    for (const code of ALL_CODES) {
+      const error = new PasskeyError(code);
+      const redacted = ["unknown_credential", "user_handle_mismatch", "counter_regressed"];
+
+      if (!redacted.includes(code)) {
+        expect(error.wireCode).toBe(code);
+        expect(error.toJSON().error.code).toBe(code);
+      }
+    }
+  });
+
   it("serialises to the wire error body and nothing else", () => {
     const error = new PasskeyError("challenge_expired", { cause: new Error("secret internals") });
 
