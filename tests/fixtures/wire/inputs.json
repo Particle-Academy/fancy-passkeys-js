@@ -1,0 +1,25 @@
+{
+  "_comment": "Fixed inputs for the wire-parity fixtures. BOTH backends are fed exactly these values and must produce the sibling `*-options.json` files. Copied verbatim into fancy-passkeys-php/tests/fixtures/wire/. Change it in both repos in the same session or the pair stops being a pair.",
+  "relyingParty": {
+    "id": "example.com",
+    "name": "Example App",
+    "origins": ["https://example.com"]
+  },
+  "user": {
+    "handle": "dXNlci1oYW5kbGUtMzItYnl0ZXMtZml4dHVyZS1hYQ",
+    "name": "ada@example.com",
+    "displayName": "Ada Lovelace"
+  },
+  "challenge": "Y2hhbGxlbmdlLWZpeHR1cmUtMzItYnl0ZXMtYWFhYQ",
+  "existingCredentials": [
+    { "id": "Y3JlZC1vbmU", "transports": ["internal"] },
+    { "id": "Y3JlZC10d28", "transports": ["usb", "nfc"] }
+  ],
+  "policy": {
+    "userVerification": "preferred",
+    "residentKey": "preferred",
+    "attestation": "none",
+    "timeoutMs": 60000,
+    "algorithms": [-8, -7, -257]
+  }
+}

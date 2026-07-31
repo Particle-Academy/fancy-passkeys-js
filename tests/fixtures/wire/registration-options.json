@@ -1,0 +1,54 @@
+{
+  "challenge": "Y2hhbGxlbmdlLWZpeHR1cmUtMzItYnl0ZXMtYWFhYQ",
+  "rp": {
+    "name": "Example App",
+    "id": "example.com"
+  },
+  "user": {
+    "id": "dXNlci1oYW5kbGUtMzItYnl0ZXMtZml4dHVyZS1hYQ",
+    "name": "ada@example.com",
+    "displayName": "Ada Lovelace"
+  },
+  "pubKeyCredParams": [
+    {
+      "alg": -8,
+      "type": "public-key"
+    },
+    {
+      "alg": -7,
+      "type": "public-key"
+    },
+    {
+      "alg": -257,
+      "type": "public-key"
+    }
+  ],
+  "timeout": 60000,
+  "attestation": "none",
+  "excludeCredentials": [
+    {
+      "id": "Y3JlZC1vbmU",
+      "transports": [
+        "internal"
+      ],
+      "type": "public-key"
+    },
+    {
+      "id": "Y3JlZC10d28",
+      "transports": [
+        "usb",
+        "nfc"
+      ],
+      "type": "public-key"
+    }
+  ],
+  "authenticatorSelection": {
+    "residentKey": "preferred",
+    "userVerification": "preferred",
+    "requireResidentKey": false
+  },
+  "extensions": {
+    "credProps": true
+  },
+  "hints": []
+}
