@@ -11,6 +11,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## 0.1.0 — 2026-08-01
+
+**First published release.** Passkey (WebAuthn) server ceremonies for Node — a thin wrapper over `@simplewebauthn/server` with **no cryptography of our own**. The Node twin of `particle-academy/fancy-passkeys`.
+
 ### Added
 
 - Initial implementation. **Not published** — no npm release and no tag exists
