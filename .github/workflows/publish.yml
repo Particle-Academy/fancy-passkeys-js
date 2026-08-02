@@ -1,24 +1,11 @@
 name: Publish to npm
 
-# BOOTSTRAP SHAPE — this package has never been published.
+# Publishes on a version tag via GitHub Actions Trusted Publishing (OIDC).
+# No tokens anywhere: the bootstrap token this package first shipped with has
+# been revoked and its Trusted Publisher configured.
 #
-# npm will not let you configure a Trusted Publisher for a package that does not
-# exist yet, so the FIRST release goes out with a short-lived granular token:
-#
-#   1. Create a 7-day granular token at
-#      https://www.npmjs.com/settings/<user>/tokens scoped to @particle-academy
-#      with read+write.
-#   2. `gh secret set NPM_TOKEN --repo Particle-Academy/fancy-passkeys-js`
-#      (paste at the prompt — it never reaches shell history).
-#   3. Tag and push. This workflow publishes.
-#
-# Then, ONCE, at
-# https://www.npmjs.com/package/@particle-academy/fancy-passkeys/access →
-# Trusted Publishers → Add: GitHub Actions / Particle-Academy /
-# fancy-passkeys-js / publish.yml / (no environment). Revoke the token, delete
-# the `env:` block below, and every later release ships on pure OIDC.
-#
-# npm is pinned to 11.18.0: 12.0.0 broke --provenance/sigstore.
+# npm is pinned to 11.18.0: OIDC needs 11.5+, the runner ships 10.x, and
+# npm@latest (12.x) broke --provenance/sigstore.
 
 on:
   push:
@@ -51,6 +38,3 @@ jobs:
 
       - name: Publish
         run: npx -y npm@11.18.0 publish --provenance --access public
-        env:
-          # DELETE THIS BLOCK once the Trusted Publisher is configured.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
