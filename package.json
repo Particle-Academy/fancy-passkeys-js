@@ -1,6 +1,6 @@
 {
   "name": "@particle-academy/fancy-passkeys",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Passkey (WebAuthn) login for Node — a thin, safe wrapper around @simplewebauthn/server that owns the parts it deliberately leaves to you: challenge issuance, single-use expiry, credential persistence, counter replay detection. Runtime twin of particle-academy/fancy-passkeys (PHP).",
   "keywords": [
     "passkey",
@@ -52,7 +52,7 @@
   ],
   "sideEffects": false,
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsup",
