@@ -11,6 +11,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-09
+
+### Added
+
+- **Tests for ceremony-type mismatch and wrong origin**, the two failure paths
+  this repo's own AGENTS.md lists as required and that nothing here exercised.
+
+  The enforcing branches and the error codes both existed; what was missing was
+  anything driving them. The PHP twin has covered both since it shipped
+  (`CeremonyFailureTest`, `OriginValidationTest`), so the pair was asymmetric —
+  and a failure path tested on one backend of a matched pair is a failure path
+  tested on neither, because the whole promise is that either can serve the same
+  UI.
+
+  Covered: a registration challenge redeemed at the authentication endpoint and
+  the reverse; that a type-mismatched challenge is still **consumed** (leaving
+  it redeemable turns a mismatch into a retry oracle); an origin the relying
+  party does not list; and an RP-ID mismatch reported distinctly from an origin
+  mismatch, because they are different misconfigurations.
+
+  Verified sensitive — disabling the ceremony-type guard fails three of them.
+
+
 ## 0.2.0 — 2026-08-07
 
 ### Changed
