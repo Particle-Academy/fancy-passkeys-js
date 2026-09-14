@@ -1,5 +1,7 @@
 # @particle-academy/fancy-passkeys
 
+[![Fancified](art/fancified.svg)](https://particle.academy)
+
 Passkey (WebAuthn) login for Node — a thin, safe wrapper around
 [`@simplewebauthn/server`](https://simplewebauthn.dev) that owns exactly the
 parts that library deliberately leaves to you, and that almost every hand-rolled
@@ -39,7 +41,7 @@ in one tree means two incompatible `WebAuthnCredential` types and a resolver
 quietly choosing whichever it likes, with nothing anywhere reporting it. This
 package's own `dependencies` is empty and stays empty.
 
-Node >= 20. ESM and CJS. TypeScript types included.
+Node >= 22. ESM and CJS. TypeScript types included.
 
 ---
 
