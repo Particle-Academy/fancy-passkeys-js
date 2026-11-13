@@ -1,0 +1,26 @@
+{
+  "about": "Which relying-party configurations RelyingParty accepts at construction. Shared byte-for-byte with the PHP twin (particle-academy/fancy-passkeys, tests/fixtures/relying-party/origins.json); change both in the same session. Plain http is allowed only for localhost and *.localhost (exact label match), IP-literal hosts are never allowed, and the RP ID must equal the origin's host or be a registrable suffix of it. Matches what Chromium accepts for WebAuthn: it accepts any *.localhost over http and refuses 127.0.0.1 as an RP ID.",
+  "accept": [
+    { "rpId": "localhost", "origin": "http://localhost:1234", "why": "localhost over http, any port" },
+    { "rpId": "localhost", "origin": "http://localhost", "why": "localhost over http, no port" },
+    { "rpId": "genie.localhost", "origin": "http://genie.localhost:5678", "why": "a *.localhost host over http, RP ID equal to the host" },
+    { "rpId": "localhost", "origin": "http://genie.localhost:5678", "why": "RP ID is a registrable suffix of a *.localhost host" },
+    { "rpId": "a.b.localhost", "origin": "http://a.b.localhost", "why": "a multi-label *.localhost host over http" },
+    { "rpId": "b.localhost", "origin": "http://a.b.localhost", "why": "RP ID is a registrable suffix of a multi-label *.localhost host" },
+    { "rpId": "example.com", "origin": "https://example.com", "why": "https, RP ID equal to the host" },
+    { "rpId": "example.com", "origin": "https://app.example.com", "why": "https, RP ID a registrable suffix of the host" },
+    { "rpId": "genie.localhost", "origin": "https://genie.localhost:8443", "why": "https is unaffected by the localhost rule" }
+  ],
+  "reject": [
+    { "rpId": "127.0.0.1", "origin": "http://127.0.0.1:1", "why": "IPv4 literal; Chromium refuses it as an RP ID" },
+    { "rpId": "127.0.0.1", "origin": "https://127.0.0.1", "why": "IPv4 literal over https is still an IP-literal RP ID" },
+    { "rpId": "[::1]", "origin": "http://[::1]:1", "why": "IPv6 literal" },
+    { "rpId": "localhost.evil.com", "origin": "http://localhost.evil.com", "why": "localhost is not the last label; a public host over http" },
+    { "rpId": "evilocalhost", "origin": "http://evilocalhost", "why": "ends with the text localhost but not with the label" },
+    { "rpId": "example.com", "origin": "http://example.com", "why": "a public host over http" },
+    { "rpId": "example.com", "origin": "https://notexample.com", "why": "text suffix, not a label suffix" },
+    { "rpId": "example.com", "origin": "https://example.org", "why": "RP ID unrelated to the host" },
+    { "rpId": "other.localhost", "origin": "http://genie.localhost", "why": "RP ID unrelated to a *.localhost host" },
+    { "rpId": "localhost", "origin": "ftp://localhost", "why": "only http is relaxed for localhost, not any non-https scheme" }
+  ]
+}

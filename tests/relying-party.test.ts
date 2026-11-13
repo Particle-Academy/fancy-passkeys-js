@@ -72,17 +72,6 @@ describe("RelyingParty", () => {
     expect(rp.expectedOrigins()).toEqual(["http://localhost:5173"]);
   });
 
-  it("accepts http://127.0.0.1", () => {
-    expect(
-      () =>
-        new RelyingParty({
-          id: "127.0.0.1",
-          name: "Example App",
-          origins: ["http://127.0.0.1:8000"],
-        }),
-    ).not.toThrow();
-  });
-
   it("requires at least one origin", () => {
     expect(
       () => new RelyingParty({ id: "example.com", name: "Example App", origins: [] }),

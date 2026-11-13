@@ -203,7 +203,7 @@ twin.
 | **Challenge single use** | Always, consumed by `pull` **before** verification | A replayed response fails at "no such challenge" regardless of its signature. |
 | **Challenge storage key** | Opaque 32-byte `state` handle | Keying by the challenge lets an observer probe for it. |
 | **Ceremony binding** | `type` stored with the record | A registration challenge cannot be redeemed at the login endpoint (`challenge_type_mismatch`). |
-| **Origins** | Exact-match allow-list, `https://` only (except `localhost` / `127.0.0.1`) | No wildcards, no regex, no "ends with". The request's own `Origin` header is never used to derive the expected value — that is checking an attacker's claim against itself. |
+| **Origins** | Exact-match allow-list, `https://` only (except `localhost` and `*.localhost`; IP-address hosts never) | No wildcards, no regex, no "ends with". The request's own `Origin` header is never used to derive the expected value — that is checking an attacker's claim against itself. |
 | **RP ID** | Explicit config, validated at construction | Must equal or be a registrable parent of every origin's host, or `RelyingParty` throws a `TypeError` **at boot**. Never taken from the request. |
 | **Credential-ID uniqueness** | Enforced across **all** users | A credential id already registered to another account is an attack or a bug; silently re-pointing it is account takeover. `excludeCredentials` is also populated so the authenticator refuses a duplicate before the round-trip. |
 | **User handle check** | Both directions | The challenge's bound handle and the assertion's reported `userHandle` must both match the stored credential (`user_handle_mismatch`). |
