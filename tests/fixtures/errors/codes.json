@@ -1,0 +1,47 @@
+{
+  "about": "Which error code and HTTP status each backend answers with, on the wire. Shared byte-for-byte with the PHP twin (particle-academy/fancy-passkeys, tests/fixtures/errors/codes.json); change both in the same session. `codes` is the closed set: every code's status and the code a client is shown (`wire`; three codes that would reveal something about a stored credential are redacted to verification_failed). `ceremonies` pins what a named failure answers, so the two backends cannot drift apart on it again: until 2026-11-13 a wrong-origin assertion was origin_not_allowed 400 from Node and verification_failed 401 from PHP. A wrong origin is decided BEFORE the credential is looked up, so the answer is the same whether or not the credential exists and the code is not an existence oracle.",
+  "codes": {
+    "challenge_expired": { "status": 400, "wire": "challenge_expired" },
+    "challenge_not_found": { "status": 400, "wire": "challenge_not_found" },
+    "challenge_type_mismatch": { "status": 400, "wire": "challenge_type_mismatch" },
+    "origin_not_allowed": { "status": 400, "wire": "origin_not_allowed" },
+    "rp_id_mismatch": { "status": 400, "wire": "rp_id_mismatch" },
+    "unknown_credential": { "status": 401, "wire": "verification_failed" },
+    "credential_already_registered": { "status": 409, "wire": "credential_already_registered" },
+    "counter_regressed": { "status": 401, "wire": "verification_failed" },
+    "user_verification_required": { "status": 401, "wire": "user_verification_required" },
+    "user_handle_mismatch": { "status": 401, "wire": "verification_failed" },
+    "verification_failed": { "status": 401, "wire": "verification_failed" },
+    "invalid_response": { "status": 400, "wire": "invalid_response" },
+    "not_supported": { "status": 400, "wire": "not_supported" }
+  },
+  "ceremonies": [
+    {
+      "name": "wrong-origin-assertion",
+      "ceremony": "authentication",
+      "credential": "registered",
+      "clientDataOrigin": "https://evil.example",
+      "why": "An assertion whose clientDataJSON origin is not on the allow-list, for a credential the server holds.",
+      "code": "origin_not_allowed",
+      "status": 400
+    },
+    {
+      "name": "wrong-origin-assertion-unknown-credential",
+      "ceremony": "authentication",
+      "credential": "unknown",
+      "clientDataOrigin": "https://evil.example",
+      "why": "The same assertion for a credential the server has never seen. It must answer exactly as above, or the origin check is a credential-existence oracle.",
+      "code": "origin_not_allowed",
+      "status": 400
+    },
+    {
+      "name": "wrong-origin-registration",
+      "ceremony": "registration",
+      "credential": "new",
+      "clientDataOrigin": "https://evil.example",
+      "why": "A registration response whose clientDataJSON origin is not on the allow-list.",
+      "code": "origin_not_allowed",
+      "status": 400
+    }
+  ]
+}

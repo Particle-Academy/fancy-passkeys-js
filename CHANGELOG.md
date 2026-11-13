@@ -53,6 +53,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **SECURITY-RELEVANT: a wrong-origin assertion no longer reveals whether the
+  credential exists.** The library checks the origin only for a credential we
+  hold; an unknown one stopped earlier as `unknown_credential` (on the wire,
+  `verification_failed` 401). So the same wrong-origin assertion answered
+  `origin_not_allowed` 400 for a stored credential and 401 for any other.
+  `finishAuthentication` now decides the origin from the client data BEFORE the
+  credential lookup, with the library's own rule (exact membership in the
+  resolved allow-list), and the library still runs every check afterwards.
+  The answer is `origin_not_allowed` 400 either way, which the PHP twin now
+  answers too; the shared fixture `tests/fixtures/errors/codes.json`
+  (byte-identical in both repos) pins it. **Consumer action:** none.
+
 - **SECURITY-RELEVANT: registration now accepts only the algorithms it offered.**
   `verifyRegistrationResponse` was called without `supportedAlgorithmIDs`, so
   the library's own default applied. In v14 that default grows to ML-DSA where

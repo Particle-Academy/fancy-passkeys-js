@@ -231,6 +231,27 @@ function counterRegressed(stored: number, next: number): boolean {
 }
 
 /**
+ * Refuse a response whose client data names an origin outside the allow-list,
+ * as `origin_not_allowed`, before anything credential-specific happens.
+ *
+ * The rule is the library's own for an array `expectedOrigin`: exact string
+ * membership. This reads one JSON field and verifies nothing; the library
+ * still runs every check, this one included. Client data that does not decode
+ * is left alone, so the library reports it exactly as before.
+ */
+function refuseForeignOrigin(clientDataJSON: string, allowed: readonly string[]): void {
+  let origin: unknown;
+  try {
+    origin = (JSON.parse(new TextDecoder().decode(fromBase64Url(clientDataJSON))) as { origin?: unknown }).origin;
+  } catch {
+    return;
+  }
+  if (typeof origin === "string" && !allowed.includes(origin)) {
+    throw PasskeyError.originNotAllowed();
+  }
+}
+
+/**
  * Both WebAuthn ceremonies, framework-free.
  *
  * Wraps `@simplewebauthn/server` and implements **no cryptography**. What it
@@ -471,6 +492,17 @@ export class PasskeyServer {
   ): Promise<FinishAuthenticationResult> {
     const record = await this.#pullChallenge(input.state, "authentication");
 
+    // Resolved and validated per verification; see finishRegistration.
+    const expectedOrigin = await this.#relyingParty.resolveOrigins();
+
+    // The origin is decided BEFORE the credential is looked up. The library
+    // checks it too, but only for a credential we hold; an unknown one stops
+    // first, as `unknown_credential`. Left that way, a wrong-origin assertion
+    // answers `origin_not_allowed` for a stored credential and
+    // `verification_failed` for any other, which is a credential-existence
+    // oracle. Here the answer depends on the origin alone.
+    refuseForeignOrigin(input.response.response.clientDataJSON, expectedOrigin);
+
     const credential = await this.#credentials.findById(input.response.id);
     if (!credential) {
       // Deliberately indistinguishable from a bad signature: same code family,
@@ -511,9 +543,6 @@ export class PasskeyServer {
      *
      * The zeroing is confined to the argument; nothing persisted is touched.
      */
-    // Resolved and validated per verification; see finishRegistration.
-    const expectedOrigin = await this.#relyingParty.resolveOrigins();
-
     let verification: Awaited<ReturnType<typeof verifyAuthenticationResponse>>;
     try {
       verification = await this.#verifier.verifyAuthenticationResponse({

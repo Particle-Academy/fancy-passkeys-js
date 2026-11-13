@@ -84,6 +84,12 @@ That is the whole reason the pair exists: one React surface, either backend.
 change a wire shape here, change it there in the same session, or the pair
 quietly stops being a pair.
 
+Errors are part of that contract: `tests/fixtures/errors/codes.json` (shared
+byte-for-byte) pins every code's HTTP status and wire code, plus what named
+failures answer, and `error-parity.test.ts` runs them against the real
+library. A wrong origin is decided before the credential lookup, so it answers
+`origin_not_allowed` whether or not the credential exists.
+
 ## Login certificates: the same bytes in both runtimes
 
 `src/canonical-json.ts` is a COPY of change-council's canonical form, and the
