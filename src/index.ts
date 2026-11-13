@@ -28,7 +28,23 @@ export {
   type ResidentKeyRequirement,
   type UserVerificationRequirement,
 } from "./policy.js";
-export { RelyingParty, type RelyingPartyOptions } from "./relying-party.js";
+export { RelyingParty, type OriginResolver, type RelyingPartyOptions } from "./relying-party.js";
+export { canonicalJson } from "./canonical-json.js";
+export {
+  LOGIN_CERTIFICATE_TOKEN_PREFIX,
+  LOGIN_CERTIFICATE_TYPE,
+  LOGIN_CERTIFICATE_VERSION,
+  isSensitiveClaimKey,
+  issueLoginCertificate,
+  loginCertificateToken,
+  verifyLoginCertificate,
+  type CertificateClaimValue,
+  type CertificateClaims,
+  type IssuedLoginCertificate,
+  type LoginCertificate,
+  type LoginCertificateInput,
+  type LoginCertificateSubject,
+} from "./login-certificate.js";
 export {
   InMemoryChallengeStore,
   InMemoryCredentialStore,
@@ -43,6 +59,7 @@ export {
   type FinishAuthenticationResult,
   type FinishRegistrationInput,
   type FinishRegistrationResult,
+  type LoginCertificateOptions,
   type PasskeyServerOptions,
   type StartAuthenticationOptions,
   type StartAuthenticationResult,

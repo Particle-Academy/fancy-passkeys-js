@@ -112,5 +112,17 @@ jobs:
       - name: Test
         run: npm test --if-present
 
+      # The peer range is >=13.3.0 <15 and the lockfile tests 14. Without this
+      # step the 13.x half of that range is a claim nothing checks. Same job, so
+      # no required-check context changes. --no-save leaves package.json and the
+      # lockfile untouched, and the closing `npm ci` puts the locked 14 back
+      # before the Build step.
+      - name: Test at the peer-range floor (@simplewebauthn/server 13.3.3)
+        run: |
+          npm install --no-save --no-audit --no-fund --legacy-peer-deps @simplewebauthn/server@13.3.3
+          npx tsc --noEmit
+          npm test
+          npm ci --no-audit --no-fund --legacy-peer-deps
+
       - name: Build
         run: npm run build --if-present

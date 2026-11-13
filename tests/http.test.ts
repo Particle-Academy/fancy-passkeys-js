@@ -199,6 +199,8 @@ describe("login", () => {
       ADA_HANDLE,
       expect.objectContaining({ id: "cred-1" }),
       CTX,
+      // No login certificate: they are off unless the server opts in.
+      null,
     );
   });
 

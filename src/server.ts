@@ -6,18 +6,53 @@ import {
 } from "@simplewebauthn/server";
 import type {
   AuthenticationResponseJSON,
-  AuthenticatorTransportFuture,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
+  WebAuthnCredential,
 } from "@simplewebauthn/server";
 
 import { assertBase64Url, copyBytes, fromBase64Url, toBase64Url } from "./encoding.js";
 import { PasskeyError, mapVerificationError } from "./errors.js";
+import {
+  issueLoginCertificate,
+  type IssuedLoginCertificate,
+  type LoginCertificateSubject,
+} from "./login-certificate.js";
 import { resolvePasskeyPolicy, type PasskeyPolicy } from "./policy.js";
 import type { RelyingParty } from "./relying-party.js";
 import type { ChallengeStore, CredentialStore } from "./stores.js";
-import type { PasskeySummary, PasskeyUser, StoredCredential } from "./types.js";
+import type { CeremonyType, PasskeySummary, PasskeyUser, StoredCredential } from "./types.js";
+
+/**
+ * The transport hint type, derived from the library rather than imported by
+ * name: v13 exported it as `AuthenticatorTransportFuture`, v14 removed that
+ * export. `WebAuthnCredential` exists in both, so this compiles against both
+ * majors of the peer range.
+ */
+type Transports = NonNullable<WebAuthnCredential["transports"]>;
+
+/**
+ * Optional login certificates. Absent or `false` (the default): none are
+ * issued, nothing is called, nothing is stored.
+ */
+export interface LoginCertificateOptions {
+  /** Which ceremonies issue one. Default: both. */
+  ceremonies?: readonly CeremonyType[];
+  /**
+   * Host-wide default claims (app name, build, region). Called with the
+   * ceremony facts; per-call `certificateClaims` win over these at the top
+   * level.
+   */
+  claims?: (subject: LoginCertificateSubject) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  /**
+   * Deliver the certificate and token to the app's storage or logs. The
+   * package keeps nothing; without this hook the certificate is only returned.
+   * Awaited, and a throw fails the call: an app that asked for an audit record
+   * gets no silent gaps. Catch inside the hook to choose otherwise.
+   */
+  deliver?: (issued: IssuedLoginCertificate) => void | Promise<void>;
+}
 
 /**
  * The four functions this package borrows from `@simplewebauthn/server`,
@@ -66,6 +101,11 @@ export interface PasskeyServerOptions {
   randomBytes?: (size: number) => Uint8Array;
   /** The WebAuthn implementation. Defaults to {@link defaultVerifier}. */
   verifier?: Verifier;
+  /**
+   * Optional login certificates — see `login-certificate.ts`. Off unless set;
+   * `{}` turns them on for both ceremonies with no hook.
+   */
+  loginCertificates?: LoginCertificateOptions | false;
 }
 
 /** `startRegistration` result: hand `publicKey` to the browser, keep `state`. */
@@ -89,6 +129,11 @@ export interface FinishRegistrationInput {
   response: RegistrationResponseJSON;
   /** Optional user-chosen label ("MacBook Touch ID"). */
   name?: string | null;
+  /**
+   * Claims for the login certificate, when certificates are on (device, IP,
+   * request id…). Ignored when they are off. Never put credentials here.
+   */
+  certificateClaims?: Record<string, unknown>;
 }
 
 /** `finishRegistration` result. */
@@ -97,6 +142,8 @@ export interface FinishRegistrationResult {
   credential: StoredCredential;
   /** The client-safe projection of the same record. */
   summary: PasskeySummary;
+  /** The login certificate, or `null` when certificates are off for this ceremony. */
+  certificate: IssuedLoginCertificate | null;
 }
 
 /** `startAuthentication` input. Omit everything for the discoverable flow. */
@@ -122,6 +169,11 @@ export interface FinishAuthenticationInput {
   state: string;
   /** Whatever the browser returned, unmodified. */
   response: AuthenticationResponseJSON;
+  /**
+   * Claims for the login certificate, when certificates are on (device, IP,
+   * request id…). Ignored when they are off. Never put credentials here.
+   */
+  certificateClaims?: Record<string, unknown>;
 }
 
 /** `finishAuthentication` result. Establish the session from `userHandle`. */
@@ -132,6 +184,8 @@ export interface FinishAuthenticationResult {
   summary: PasskeySummary;
   /** The account that just authenticated. */
   userHandle: string;
+  /** The login certificate, or `null` when certificates are off for this ceremony. */
+  certificate: IssuedLoginCertificate | null;
 }
 
 /** The client-safe projection of a credential. Never includes the public key. */
@@ -152,6 +206,11 @@ export function toPasskeySummary(credential: StoredCredential): PasskeySummary {
 const CHALLENGE_BYTES = 32;
 /** 32 bytes of opaque handle. Same reasoning. */
 const STATE_BYTES = 32;
+/**
+ * 16 bytes of login-certificate nonce: enough that a token cannot be reversed
+ * by enumerating plausible claims, and that two identical sign-ins differ.
+ */
+const CERTIFICATE_NONCE_BYTES = 16;
 
 const defaultRandomBytes = (size: number): Uint8Array => {
   const bytes = new Uint8Array(size);
@@ -198,6 +257,7 @@ export class PasskeyServer {
   readonly #now: () => number;
   readonly #randomBytes: (size: number) => Uint8Array;
   readonly #verifier: Verifier;
+  readonly #certificates: LoginCertificateOptions | null;
 
   constructor(options: PasskeyServerOptions) {
     this.#relyingParty = options.relyingParty;
@@ -207,6 +267,7 @@ export class PasskeyServer {
     this.#now = options.now ?? Date.now;
     this.#randomBytes = options.randomBytes ?? defaultRandomBytes;
     this.#verifier = options.verifier ?? defaultVerifier;
+    this.#certificates = options.loginCertificates ? options.loginCertificates : null;
   }
 
   /** The resolved policy this server runs under. */
@@ -248,7 +309,7 @@ export class PasskeyServer {
       attestationType: this.#policy.attestation,
       excludeCredentials: existing.map((credential) => ({
         id: credential.id,
-        transports: credential.transports as AuthenticatorTransportFuture[],
+        transports: credential.transports as Transports,
       })),
       authenticatorSelection: {
         residentKey: this.#policy.residentKey,
@@ -294,14 +355,24 @@ export class PasskeyServer {
       throw PasskeyError.credentialAlreadyRegistered();
     }
 
+    // Resolved per verification, and validated every time. Outside the
+    // try/catch on purpose: a refused origin list is a configuration error (a
+    // TypeError, the app's 500), not a failed login to report to the client.
+    const expectedOrigin = await this.#relyingParty.resolveOrigins();
+
     let verification: Awaited<ReturnType<typeof verifyRegistrationResponse>>;
     try {
       verification = await this.#verifier.verifyRegistrationResponse({
         response: input.response,
         expectedChallenge: record.challenge,
-        expectedOrigin: this.#relyingParty.expectedOrigins(),
+        expectedOrigin,
         expectedRPID: this.#relyingParty.id,
         requireUserVerification: this.#policy.userVerification === "required",
+        // The list we offered is the list we accept. Without this the library
+        // applies its own default, which v14 widened (ML-DSA where the runtime
+        // supports it) — a credential type we never offered would be enrolled.
+        // The PHP twin gets the same rule from web-auth's CheckAlgorithm step.
+        supportedAlgorithmIDs: [...this.#policy.algorithms],
       });
     } catch (err) {
       // v13 throws a bare `Error` for challenge / origin / RP ID / UP / UV
@@ -340,7 +411,12 @@ export class PasskeyServer {
 
     await this.#credentials.save(credential);
 
-    return { credential, summary: toPasskeySummary(credential) };
+    const certificate = await this.#issueCertificate(
+      { ceremony: "registration", rpId: this.#relyingParty.id, credentialId: credential.id, userHandle: credential.userHandle },
+      input.certificateClaims,
+    );
+
+    return { credential, summary: toPasskeySummary(credential), certificate };
   }
 
   /**
@@ -366,7 +442,7 @@ export class PasskeyServer {
       rpID: this.#relyingParty.id,
       allowCredentials: known.map((credential) => ({
         id: credential.id,
-        transports: credential.transports as AuthenticatorTransportFuture[],
+        transports: credential.transports as Transports,
       })),
       challenge: this.#challenge(),
       timeout: this.#policy.timeoutMs,
@@ -435,19 +511,22 @@ export class PasskeyServer {
      *
      * The zeroing is confined to the argument; nothing persisted is touched.
      */
+    // Resolved and validated per verification; see finishRegistration.
+    const expectedOrigin = await this.#relyingParty.resolveOrigins();
+
     let verification: Awaited<ReturnType<typeof verifyAuthenticationResponse>>;
     try {
       verification = await this.#verifier.verifyAuthenticationResponse({
         response: input.response,
         expectedChallenge: record.challenge,
-        expectedOrigin: this.#relyingParty.expectedOrigins(),
+        expectedOrigin,
         expectedRPID: this.#relyingParty.id,
         requireUserVerification: this.#policy.userVerification === "required",
         credential: {
           id: credential.id,
           publicKey: fromBase64Url(credential.publicKey),
           counter: enforceCounterInLibrary ? credential.signCount : 0,
-          transports: credential.transports as AuthenticatorTransportFuture[],
+          transports: credential.transports as Transports,
         },
       });
     } catch (err) {
@@ -490,11 +569,49 @@ export class PasskeyServer {
       clonedAt,
     };
 
+    // Only now, after the ceremony verified and its outcome is persisted.
+    const certificate = await this.#issueCertificate(
+      { ceremony: "authentication", rpId: this.#relyingParty.id, credentialId: credential.id, userHandle: credential.userHandle },
+      input.certificateClaims,
+    );
+
     return {
       credential: updated,
       summary: toPasskeySummary(updated),
       userHandle: credential.userHandle,
+      certificate,
     };
+  }
+
+  /**
+   * Issue and deliver a login certificate, when the host turned them on for
+   * this ceremony. Returns `null` otherwise, having called nothing.
+   */
+  async #issueCertificate(
+    subject: LoginCertificateSubject,
+    claims: Record<string, unknown> | undefined,
+  ): Promise<IssuedLoginCertificate | null> {
+    const options = this.#certificates;
+    if (!options) {
+      return null;
+    }
+    const ceremonies = options.ceremonies ?? ["registration", "authentication"];
+    if (!ceremonies.includes(subject.ceremony)) {
+      return null;
+    }
+
+    const defaults = options.claims ? await options.claims({ ...subject }) : {};
+    const issued = await issueLoginCertificate({
+      ...subject,
+      issuedAt: this.#nowIso(),
+      nonce: toBase64Url(this.#randomBytes(CERTIFICATE_NONCE_BYTES)),
+      claims: { ...defaults, ...(claims ?? {}) },
+    });
+
+    if (options.deliver) {
+      await options.deliver(issued);
+    }
+    return issued;
   }
 
   /** Every passkey an account has enrolled, as client-safe summaries. */

@@ -18,6 +18,7 @@
 import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON, RegistrationResponseJSON, AuthenticationResponseJSON } from "@simplewebauthn/server";
 
 import { PasskeyError } from "./errors.js";
+import type { IssuedLoginCertificate } from "./login-certificate.js";
 import type { PasskeyServer } from "./server.js";
 import type { PasskeyErrorCode, PasskeySummary, PasskeyUser, StoredCredential } from "./types.js";
 
@@ -53,8 +54,23 @@ export interface PasskeyHooks<Ctx = unknown> {
    *
    * Whatever it resolves to becomes the `user` field of the login response, so
    * return the app's public user payload (and `undefined` if there isn't one).
+   *
+   * `certificate` is the login certificate when the server was built with
+   * `loginCertificates`, and `null` otherwise. It is never put on the wire.
    */
-  onAuthenticated(userHandle: string, credential: StoredCredential, ctx: Ctx): Promise<unknown>;
+  onAuthenticated(
+    userHandle: string,
+    credential: StoredCredential,
+    ctx: Ctx,
+    certificate: IssuedLoginCertificate | null,
+  ): Promise<unknown>;
+
+  /**
+   * Request-level claims for the login certificate — client IP, user agent,
+   * request id. Called for sign-in and enrollment, and only matters when the
+   * server was built with `loginCertificates`. Never return credentials.
+   */
+  certificateClaims?(ctx: Ctx): Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
 /** What a handler is given: the parsed JSON body, and the framework's request. */
@@ -169,7 +185,13 @@ export function createPasskeyHandlers<Ctx = unknown>(
         const response = requiredCeremonyResponse<RegistrationResponseJSON>(body);
         const name = optionalString(body, "name");
 
-        const { summary } = await server.finishRegistration({ state, response, name });
+        const certificateClaims = hooks.certificateClaims ? await hooks.certificateClaims(input.ctx) : undefined;
+        const { summary } = await server.finishRegistration({
+          state,
+          response,
+          name,
+          ...(certificateClaims === undefined ? {} : { certificateClaims }),
+        });
         return { status: 201, body: { credential: summary } };
       });
     },
@@ -200,8 +222,18 @@ export function createPasskeyHandlers<Ctx = unknown>(
         const state = requiredString(body, "state");
         const response = requiredCeremonyResponse<AuthenticationResponseJSON>(body);
 
-        const result = await server.finishAuthentication({ state, response });
-        const user = await hooks.onAuthenticated(result.userHandle, result.credential, input.ctx);
+        const certificateClaims = hooks.certificateClaims ? await hooks.certificateClaims(input.ctx) : undefined;
+        const result = await server.finishAuthentication({
+          state,
+          response,
+          ...(certificateClaims === undefined ? {} : { certificateClaims }),
+        });
+        const user = await hooks.onAuthenticated(
+          result.userHandle,
+          result.credential,
+          input.ctx,
+          result.certificate,
+        );
 
         return { status: 200, body: { user: user ?? null, credential: result.summary } };
       });

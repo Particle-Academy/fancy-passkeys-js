@@ -11,8 +11,41 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`@simplewebauthn/server` 14 is supported.** The peer range widens from
+  `^13.0.0` to `>=13.3.0 <15`; the suite runs against 13.3.3 and 14.1.0, and CI
+  now tests the 13.3.3 floor as well as the locked 14. **Consumer action:**
+  none. Widening only adds versions; whatever you have installed in 13.3+ still
+  resolves. If you are on 13.0 to 13.2, move to 13.3 or later.
+- **`origins` may be a function** (`OriginResolver`), called on every
+  verification and validated each time with the same rules as a static list,
+  including the localhost and IP-literal rules. `RelyingParty.setOrigins()`
+  replaces the list or resolver (a refused list leaves the old one in place),
+  `resolveOrigins()` returns the current list, `hasDynamicOrigins` tells the
+  two apart. Built for desktop apps whose local server port is picked at
+  launch; the README documents the single-user desktop shape.
+- **Optional login certificates.** `loginCertificates` on `PasskeyServer` (off by
+  default) issues a canonical record of each successful sign-in and enrollment
+  with app-supplied claims, and a token `fplc_v1_<sha256 hex>` of its canonical
+  bytes. `issueLoginCertificate`, `loginCertificateToken`,
+  `verifyLoginCertificate`, `isSensitiveClaimKey` and `canonicalJson` are
+  exported. Known-sensitive claim keys are stripped and reported. The canonical
+  form is change-council's, and `tests/fixtures/login-certificate/vectors.json`
+  is shared with the PHP twin, so tokens agree across backends. The package
+  stores nothing: a `deliver` hook hands the certificate to the app.
+- `./http`: an optional `certificateClaims(ctx)` hook, and `onAuthenticated`
+  receives the issued certificate (or `null`) as a fourth argument. Existing
+  three-argument hooks keep working. The wire contract is unchanged.
+
 ### Changed
 
+- `RelyingParty.origins` is now a getter (same `readonly string[]` value for a
+  static list). For a resolver it resolves on access, and throws for an async
+  resolver. **Consumer action:** none unless you assigned to it, which was
+  never allowed.
+- `finishRegistration` / `finishAuthentication` results carry a `certificate`
+  field (`null` unless certificates are on). Additive.
 - **Releases need a lab-run certificate.** `publish.yml` gains a read-only
   `lab-certificate` job that every publishing job needs: a tag is published only
   when the fancy-labs lab has certified that exact version and commit. Consumers
@@ -20,6 +53,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **SECURITY-RELEVANT: registration now accepts only the algorithms it offered.**
+  `verifyRegistrationResponse` was called without `supportedAlgorithmIDs`, so
+  the library's own default applied. In v14 that default grows to ML-DSA where
+  the runtime supports it, which would have enrolled a credential type the
+  options never offered. The policy's `algorithms` list is now passed, matching
+  the PHP twin, where web-auth's `CheckAlgorithm` step already enforced it.
+  **Consumer action:** none; the default list (`-8, -7, -257`) is unchanged.
+- Compiles against v14's types, which dropped the `AuthenticatorTransportFuture`
+  export. The transport type is now derived from `WebAuthnCredential`.
 - **`RelyingParty` now accepts `*.localhost` hosts over plain http.** A
   configuration such as RP ID `genie.localhost` with origin
   `http://genie.localhost:5678` threw at construction, although Chromium runs

@@ -34,9 +34,26 @@ export interface RelyingPartyOptions {
    * No wildcards, no regex, no "ends with". The request's own `Origin` /
    * `Referer` header is never consulted to build this list, because checking an
    * attacker's claim against itself is not a check.
+   *
+   * **Or a function**, for an app whose origin is only known at run time — a
+   * desktop app serving its UI from a local server on a port chosen at launch.
+   * It is called on EVERY verification, and every list it returns is held to
+   * exactly the rules a static list is held to at construction (https, or http
+   * on `localhost` / `*.localhost`; no IP literals; the RP ID must be the host
+   * or a registrable suffix of it). A resolver is a way to change the
+   * allow-list, never a way around it.
    */
-  origins: string[];
+  origins: readonly string[] | OriginResolver;
 }
+
+/**
+ * Returns the allowed origins for the verification about to run.
+ *
+ * May be async. Must not consult the request being verified: deriving the
+ * expected origin from the request is checking the attacker's claim against
+ * itself, and a resolver is no exception.
+ */
+export type OriginResolver = () => readonly string[] | Promise<readonly string[]>;
 
 /**
  * Whether plain `http://` is tolerated for this host: `localhost` itself, or any
@@ -88,7 +105,7 @@ function isIpLiteral(host: string): boolean {
 export class RelyingParty {
   readonly id: string;
   readonly name: string;
-  readonly origins: readonly string[];
+  #origins: readonly string[] | OriginResolver;
 
   constructor(options: RelyingPartyOptions) {
     const id = typeof options.id === "string" ? options.id.trim().toLowerCase() : "";
@@ -113,66 +130,143 @@ export class RelyingParty {
       );
     }
 
-    const origins = Array.isArray(options.origins) ? options.origins : [];
-    if (origins.length === 0) {
-      throw new TypeError(
-        "RelyingParty `origins` must list at least one origin. It is an exact-match allow-list, never derived from the request.",
-      );
-    }
-
-    for (const origin of origins) {
-      let url: URL;
-      try {
-        url = new URL(origin);
-      } catch {
-        throw new TypeError(
-          `RelyingParty origin "${origin}" is not a valid URL. Use a full origin, e.g. "https://example.com".`,
-        );
-      }
-
-      // The browser reports `clientData.origin` in canonical serialised form
-      // (`scheme://host[:port]`, never a trailing slash). Anything else here
-      // would never match, so it is rejected now rather than on every login.
-      if (url.origin !== origin) {
-        throw new TypeError(
-          `RelyingParty origin "${origin}" must be exactly a serialised origin with no path or trailing slash — did you mean "${url.origin}"?`,
-        );
-      }
-
-      const host = url.hostname.toLowerCase();
-
-      if (isIpLiteral(host)) {
-        throw new TypeError(
-          `RelyingParty origin "${origin}" has an IP-address host. WebAuthn needs a domain name; for local development use "localhost" or a "*.localhost" name.`,
-        );
-      }
-
-      if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost(host))) {
-        throw new TypeError(
-          `RelyingParty origin "${origin}" must use https. Only localhost and *.localhost hosts may use http.`,
-        );
-      }
-
-      // The RP ID must be the origin's host or a registrable parent of it —
-      // exactly the rule the browser applies before it will run the ceremony.
-      if (host !== id && !host.endsWith(`.${id}`)) {
-        throw new TypeError(
-          `RelyingParty id "${id}" is not the host of origin "${origin}" nor a registrable parent of it. The browser would reject every ceremony.`,
-        );
-      }
-    }
-
     this.id = id;
     this.name = name;
-    this.origins = Object.freeze([...origins]);
+    this.#origins = typeof options.origins === "function"
+      ? options.origins
+      : validateOrigins(id, options.origins);
+  }
+
+  /** Whether the origins come from a resolver rather than a fixed list. */
+  get hasDynamicOrigins(): boolean {
+    return typeof this.#origins === "function";
   }
 
   /**
-   * The allow-list to hand the verifier as `expectedOrigin`.
+   * The configured allow-list. For a resolver this resolves it now — see
+   * {@link expectedOrigins}.
+   */
+  get origins(): readonly string[] {
+    return Object.freeze(this.expectedOrigins());
+  }
+
+  /**
+   * Replace the allowed origins: a new fixed list, or a resolver.
+   *
+   * A fixed list is validated here, and when it is refused the previous
+   * configuration stays in place — a failed update must not leave the relying
+   * party with no allow-list, or with a half-applied one.
+   */
+  setOrigins(origins: readonly string[] | OriginResolver): void {
+    this.#origins = typeof origins === "function" ? origins : validateOrigins(this.id, origins);
+  }
+
+  /**
+   * The allow-list to hand the verifier as `expectedOrigin`, synchronously.
+   *
+   * A synchronous resolver is called and its result validated. An async one
+   * cannot be answered here, so this throws and points at
+   * {@link resolveOrigins}, which is what `PasskeyServer` uses.
    *
    * Returns a fresh array so a caller cannot mutate the configured list.
    */
   expectedOrigins(): string[] {
-    return [...this.origins];
+    const source = this.#origins;
+    if (typeof source !== "function") {
+      return [...source];
+    }
+    const resolved = source();
+    if (isPromiseLike(resolved)) {
+      throw new TypeError(
+        "RelyingParty origins come from an async resolver; call `await relyingParty.resolveOrigins()` instead of expectedOrigins().",
+      );
+    }
+    return [...validateOrigins(this.id, resolved)];
   }
+
+  /**
+   * The allow-list for the verification about to run.
+   *
+   * A resolver is called on every call, and whatever it returns is validated
+   * with the construction rules every time — a value that would have been
+   * refused at boot is refused here, and the ceremony never reaches the
+   * verifier. A resolver that throws propagates: no list is never "allow all".
+   */
+  async resolveOrigins(): Promise<string[]> {
+    const source = this.#origins;
+    if (typeof source !== "function") {
+      return [...source];
+    }
+    return [...validateOrigins(this.id, await source())];
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
+/**
+ * The origin rules, in one place, so a static list at construction, a list
+ * passed to `setOrigins`, and every list a resolver returns are held to exactly
+ * the same checks. Returns a frozen copy.
+ */
+function validateOrigins(id: string, candidate: unknown): readonly string[] {
+  const origins: unknown[] = Array.isArray(candidate) ? candidate : [];
+  if (origins.length === 0) {
+    throw new TypeError(
+      "RelyingParty `origins` must list at least one origin. It is an exact-match allow-list, never derived from the request.",
+    );
+  }
+
+  for (const origin of origins) {
+    if (typeof origin !== "string") {
+      throw new TypeError("Every RelyingParty origin must be a string.");
+    }
+
+    let url: URL;
+    try {
+      url = new URL(origin);
+    } catch {
+      throw new TypeError(
+        `RelyingParty origin "${origin}" is not a valid URL. Use a full origin, e.g. "https://example.com".`,
+      );
+    }
+
+    // The browser reports `clientData.origin` in canonical serialised form
+    // (`scheme://host[:port]`, never a trailing slash). Anything else here
+    // would never match, so it is rejected now rather than on every login.
+    if (url.origin !== origin) {
+      throw new TypeError(
+        `RelyingParty origin "${origin}" must be exactly a serialised origin with no path or trailing slash — did you mean "${url.origin}"?`,
+      );
+    }
+
+    const host = url.hostname.toLowerCase();
+
+    if (isIpLiteral(host)) {
+      throw new TypeError(
+        `RelyingParty origin "${origin}" has an IP-address host. WebAuthn needs a domain name; for local development use "localhost" or a "*.localhost" name.`,
+      );
+    }
+
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost(host))) {
+      throw new TypeError(
+        `RelyingParty origin "${origin}" must use https. Only localhost and *.localhost hosts may use http.`,
+      );
+    }
+
+    // The RP ID must be the origin's host or a registrable parent of it —
+    // exactly the rule the browser applies before it will run the ceremony.
+    if (host !== id && !host.endsWith(`.${id}`)) {
+      throw new TypeError(
+        `RelyingParty id "${id}" is not the host of origin "${origin}" nor a registrable parent of it. The browser would reject every ceremony.`,
+      );
+    }
+  }
+
+  return Object.freeze([...(origins as string[])]);
 }

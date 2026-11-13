@@ -84,6 +84,21 @@ That is the whole reason the pair exists: one React surface, either backend.
 change a wire shape here, change it there in the same session, or the pair
 quietly stops being a pair.
 
+## Login certificates: the same bytes in both runtimes
+
+`src/canonical-json.ts` is a COPY of change-council's canonical form, and the
+PHP twin carries a copy of change-council's PHP class. Do not "improve" either
+copy: a token minted by one backend must verify on the other.
+`tests/fixtures/login-certificate/vectors.json` is shared with the PHP repo and
+is regenerated only by `scripts/generate-certificate-fixtures.ts`, which refuses
+to write if the issued certificates or stripped lists differ from the
+hand-written expectations in it. The claim rules in `login-certificate.ts`
+(printable-ASCII, not-all-digit keys; safe integers; no floats) exist because
+those are exactly the places PHP and JavaScript would canonicalise differently.
+
+The certificate token is a SHA-256, not a signature, and the docs say so. It is
+also not WebAuthn work: it runs after the ceremony has verified.
+
 ## Commands
 
 ```bash

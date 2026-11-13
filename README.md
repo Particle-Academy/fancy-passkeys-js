@@ -20,7 +20,7 @@ What it *does* own:
 2. **Persisting the credential**, and enforcing credential-ID uniqueness across
    every user.
 3. **Persisting the signature counter** after every successful assertion.
-4. **Normalising errors** into a closed, wire-safe set — because v13 throws a
+4. **Normalising errors** into a closed, wire-safe set — because v13 and v14 throw a
    bare `Error` for nearly every mismatch, and an unwrapped call reports
    "500 Internal Server Error" for "that login is not valid".
 
@@ -40,6 +40,9 @@ npm install @particle-academy/fancy-passkeys @simplewebauthn/server
 in one tree means two incompatible `WebAuthnCredential` types and a resolver
 quietly choosing whichever it likes, with nothing anywhere reporting it. This
 package's own `dependencies` is empty and stays empty.
+
+Supported peer range: `@simplewebauthn/server` **`>=13.3.0 <15`**. CI runs the
+full suite against both 13.3.3 and the locked 14.x.
 
 Node >= 22. ESM and CJS. TypeScript types included.
 
@@ -424,6 +427,150 @@ Authentication middleware belongs in front of the two enrollment routes too. If
 — the closed error set has no `unauthenticated` member (over in Laravel the
 route group sits behind `auth` middleware and the controller is never reached),
 so that is the backstop, not the mechanism.
+
+To issue [login certificates](#login-certificates) from these routes, add a
+`certificateClaims(ctx)` hook returning the request-level claims (IP, user
+agent, request id). `onAuthenticated` then receives the issued certificate as
+its fourth argument (`null` when certificates are off). Nothing about the wire
+contract changes: the certificate never goes to the client.
+
+---
+
+## Origins resolved at run time
+
+`origins` may be a function instead of a list. It is called on **every**
+verification, and every list it returns is validated with exactly the rules a
+static list gets at construction: https, or http only on `localhost` and
+`*.localhost`; no IP-address hosts; no paths; the RP ID must be the host or a
+registrable suffix of it. A value the constructor would refuse is refused at
+verification too, every time, as a `TypeError` (a configuration error, so the
+app's 500, never a client-facing 4xx), and the verifier is never reached.
+
+```ts
+const rp = new RelyingParty({
+  id: "localhost",
+  name: "My Desktop App",
+  origins: () => [`http://localhost:${localServer.port}`],   // may be async
+});
+
+// Or swap the allow-list later. A static list is validated immediately, and a
+// refused list leaves the previous configuration in place.
+rp.setOrigins(["http://localhost:51234"]);
+rp.setOrigins(async () => (await settings.load()).origins);
+```
+
+The resolver must never read the request being verified. Deriving the expected
+origin from the request is checking the attacker's claim against itself.
+`rp.resolveOrigins()` returns the current list; `rp.expectedOrigins()` does too
+for a static list or a synchronous resolver, and throws for an async one.
+
+## Desktop apps: one user, one credential per device
+
+A desktop app (Electron, Tauri, a local web UI) usually has exactly one account.
+The shape that works:
+
+- **One user handle.** Mint 32 random bytes once, on first run, and keep it in
+  the app's settings. It is the `handle` of the single `PasskeyUser`; never a
+  username, a machine id or anything derived from the OS account.
+- **One credential per enrolled device.** Each device the person enrolls (this
+  laptop's platform authenticator, a phone over hybrid, a security key) is its
+  own credential under that one handle. `excludeCredentials` stops the same
+  authenticator enrolling twice, and losing a device means revoking one
+  credential, not resetting the account.
+- **RP ID `localhost` (or a `*.localhost` name)** with the local server's origin
+  supplied by a resolver, because the port is often chosen at launch. Never an
+  IP literal: browsers refuse `127.0.0.1` as an RP ID, so it is refused here at
+  construction.
+- **Sign in with the discoverable flow** (`startAuthentication()` with no user
+  handle). With one account there is nothing to type, and the assertion's
+  `userHandle` is checked against the stored one as usual.
+- **Persist the stores.** `InMemoryChallengeStore` is fine for a single local
+  process; credentials must survive a restart, so back `CredentialStore` with
+  the app's own database or settings file.
+
+## Login certificates
+
+**Optional, and off unless you turn them on.** When a ceremony succeeds, the
+server can build a *login certificate*: a canonical record of the ceremony plus
+whatever claims your app wants in it, and a token that is the SHA-256 of that
+record. Log the token with the request, quote it in a support ticket, store the
+certificate in an audit table, and later check any of them against the others.
+
+```ts
+const server = new PasskeyServer({
+  relyingParty, challenges, credentials,
+  loginCertificates: {
+    ceremonies: ["authentication", "registration"],  // the default: both
+    claims: () => ({ app: "desktop", build: "1.4.2" }), // host-wide defaults
+    deliver: async ({ certificate, canonical, token }) => {
+      await db.loginCertificates.insert({ token, canonical });
+      logger.info({ loginCertificate: token }, "passkey sign-in");
+    },
+  },
+});
+
+const result = await server.finishAuthentication({
+  state, response,
+  certificateClaims: { ip: req.ip, userAgent: req.get("user-agent"), requestId: req.id },
+});
+result.certificate?.token; // "fplc_v1_2a5e10b3…"
+```
+
+The certificate (v1):
+
+```json
+{
+  "type": "fancy-passkeys.login-certificate",
+  "version": 1,
+  "ceremony": "authentication",
+  "issuedAt": "2026-11-13T09:30:00.000Z",
+  "nonce": "AAECAwQFBgcICQoLDA0ODw",
+  "rpId": "example.com",
+  "credentialId": "Y3JlZC1vbmU",
+  "userHandle": "YWRhLXVzZXItaGFuZGxl",
+  "claims": { "ip": "203.0.113.7", "requestId": "req_01HZX" }
+}
+```
+
+- **Canonical form:** change-council's canonical JSON (keys sorted at every
+  depth, lists in order, no whitespace, slashes and non-ASCII unescaped), so the
+  same certificate has the same bytes in PHP and Node. `issued.canonical` is
+  those bytes; store them if you store the certificate.
+- **Token:** `fplc_v1_` + 64 lowercase hex characters of SHA-256 over the
+  canonical bytes. `v1` names the schema, the canonical form and the hash
+  together.
+- **Verification:** `await verifyLoginCertificate(certificate, token)` takes the
+  object or its stored JSON and returns `true` or `false`; it never throws.
+- **Nonce:** 16 random bytes per certificate, so two identical sign-ins never
+  share a token and a token cannot be reversed by guessing an IP and a time.
+- **Delivery:** `deliver` is awaited, and if it throws the call fails, so an app
+  that asked for an audit trail gets no silent gaps. Catch inside the hook to
+  choose otherwise. Without `deliver` the certificate is only returned. **The
+  package stores nothing.**
+- **Same bytes as PHP.** `tests/fixtures/login-certificate/vectors.json` is
+  shared with `particle-academy/fancy-passkeys`: a token minted by one backend
+  verifies on the other.
+
+**What a token is not.** It is a hash, not a signature: anyone holding a
+certificate can compute its token. A match proves the record and the token
+belong together, not who wrote them, and a token is never proof of a session.
+If you need tamper evidence, keep certificates where an attacker cannot write,
+or sign them yourself.
+
+**No secrets in a certificate.** Do not put passwords, tokens, cookies, API
+keys, session ids or any other credential in the claims. As a backstop, keys
+that look sensitive are **stripped** at any depth and reported in
+`issued.stripped` (for example `claims.device.sessionId`). The match ignores
+case and punctuation: any key containing `password`, `passwd`, `secret`,
+`token`, `apikey`, `authorization`, `cookie`, `privatekey`, `sessionid` or
+`recoverycode`, and any key that is exactly `otp`, `totp`, `pin`, `pwd`, `cvv`,
+`ssn`, `session` or `auth`. That list catches the obvious names. It does not
+make a credential safe under any other name.
+
+**Claim values** must have one canonical form in both runtimes, so issuing
+throws a `TypeError` for: floats (send them as strings), integers beyond
+2^53-1, keys that are not printable ASCII or are all digits, `undefined`,
+functions, class instances such as `Date`, and malformed Unicode.
 
 ---
 

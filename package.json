@@ -63,10 +63,10 @@
     "prepublishOnly": "tsup"
   },
   "peerDependencies": {
-    "@simplewebauthn/server": "^13.0.0"
+    "@simplewebauthn/server": ">=13.3.0 <15"
   },
   "devDependencies": {
-    "@simplewebauthn/server": "^13.3.2",
+    "@simplewebauthn/server": "^14.1.0",
     "@types/node": "^22.0.0",
     "eslint": "^10.8.0",
     "tsup": "^8.0.0",
