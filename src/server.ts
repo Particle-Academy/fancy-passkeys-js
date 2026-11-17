@@ -655,7 +655,7 @@ export class PasskeyServer {
    *
    * The `pull` is the first thing either finish handler does, before a single
    * byte of the response is looked at. That ordering IS the anti-replay
-   * mechanism — see AGENTS.md, "The three things a reviewer should check
+   * mechanism — see CONTRIBUTING.md, "The three things a reviewer should check
    * first".
    */
   async #pullChallenge(

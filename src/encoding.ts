@@ -4,7 +4,7 @@
  * This is the only "binary" code in the package and it is deliberately trivial:
  * encoding, not cryptography. Everything WebAuthn-shaped — CBOR, COSE, ASN.1,
  * signature verification — belongs to `@simplewebauthn/server` and never comes
- * here. See AGENTS.md.
+ * here. See CONTRIBUTING.md.
  *
  * Everything this package persists or puts on the wire is base64url **text**
  * (credential ids, public keys, user handles, challenges), because mirroring a

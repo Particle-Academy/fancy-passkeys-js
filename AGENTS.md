@@ -1,128 +1,81 @@
-# AGENTS.md — fancy-passkeys-js
+# Using @particle-academy/fancy-passkeys (Node) — guide for agents
 
-Passkey (WebAuthn) login for Node. `CLAUDE.md` points here. Read the envelope's
-`AGENTS.md` too, and `.ai/plans/fancy-passkeys.md` — that plan is the wire
-contract this package and its PHP twin are both held to.
+How an agent installs and uses this package in a consumer app. What the package
+is, is in [README.md](./README.md). Notes for working ON this repo's code are in
+[CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## The rule that shapes this repo
-
-**We do not implement WebAuthn cryptography, and we never will.**
-
-CBOR decoding, COSE key parsing, ASN.1, attestation chains, RP-ID hashing,
-`clientDataJSON` canonicalisation — this is the class of code whose bugs are
-silent and total. A subtle mistake does not throw; it accepts a signature it
-should have rejected, forever, for everyone, and the tests pass. So
-`@simplewebauthn/server` does all of it and this package does none of it.
-
-What this package owns is precisely what that library deliberately leaves to
-the caller, and what almost every hand-rolled integration gets wrong:
-
-1. **Issuing, storing, expiring, and single-using the challenge.**
-2. **Persisting the credential**, and enforcing credential-ID uniqueness.
-3. **Persisting the counter** after every successful assertion.
-4. **Normalising errors** into a closed, wire-safe set.
-
-If a change to this repo would put a crypto primitive in `src/`, the change is
-wrong. Fix the wrapper, or fix it upstream.
-
-## The three things a reviewer should check first
-
-### 1. The challenge is pulled BEFORE it is verified
-
-```ts
-const record = await challenges.pull(handle);   // reads AND deletes
-if (!record) throw new PasskeyError('challenge_not_found');
-// ...only now do we verify
-```
-
-Inverted — verify first, delete after — a replayed response with a valid
-signature succeeds on every retry, and nothing anywhere reports it. The
-ordering is the entire anti-replay mechanism. `store.test.ts` asserts that a
-second `pull()` of the same handle returns `null`, and `server.test.ts` asserts
-that a replayed finish fails with `challenge_not_found`.
-
-### 2. Every call into `@simplewebauthn/server` is wrapped in try/catch
-
-**v13 throws plain `Error`s for nearly every mismatch** — wrong challenge,
-wrong origin, wrong RP ID, missing user presence, missing user verification,
-counter regression. Only the final cryptographic check returns
-`{ verified: false }`.
-
-An unwrapped call therefore turns "this login is not valid" into "500 Internal
-Server Error". That is a bad UX and an information leak (the stack differs by
-failure mode). `mapVerificationError()` exists for exactly this and is the only
-place those errors are allowed to be interpreted.
-
-### 3. The counter is persisted on EVERY success, including when it is 0
-
-Not persisting it is the most common way the clone detector is silently
-defeated: the stored value never advances, so every comparison is against 0 and
-the check can never fire.
-
-Related, and load-bearing: **both counters being 0 is accepted.** Most synced
-passkey providers (iCloud Keychain, Google Password Manager) do not implement
-counters at all and always send 0. A strict `new > stored` rule rejects the
-majority of real passkeys in the world.
-
-## Dependencies
-
-- `@simplewebauthn/server` is a **peer, never a dependency**, and is in
-  `external` in `tsup.config.ts`. Two copies in a tree means two incompatible
-  `WebAuthnCredential` types, and the resolver reports nothing.
-- `dependencies` is **empty and stays empty**. `packaging.test.ts` asserts it.
-- The `./http` subpath must stay free of any HTTP framework. It exports plain
-  `(input) => output` functions; the consumer adapts them. The moment it
-  imports Express it stops working for the Hono user.
-
-## Wire parity with the PHP twin
-
-`particle-academy/fancy-passkeys` (PHP) must emit an **equal** payload —
-deep-equal once parsed, since key order is not part of the contract.
-That is the whole reason the pair exists: one React surface, either backend.
-`parity.test.ts` asserts this package's output against fixtures in
-`tests/fixtures/wire/`, and the PHP repo asserts against the same files. If you
-change a wire shape here, change it there in the same session, or the pair
-quietly stops being a pair.
-
-Errors are part of that contract: `tests/fixtures/errors/codes.json` (shared
-byte-for-byte) pins every code's HTTP status and wire code, plus what named
-failures answer, and `error-parity.test.ts` runs them against the real
-library. A wrong origin is decided before the credential lookup, so it answers
-`origin_not_allowed` whether or not the credential exists.
-
-## Login certificates: the same bytes in both runtimes
-
-`src/canonical-json.ts` is a COPY of change-council's canonical form, and the
-PHP twin carries a copy of change-council's PHP class. Do not "improve" either
-copy: a token minted by one backend must verify on the other.
-`tests/fixtures/login-certificate/vectors.json` is shared with the PHP repo and
-is regenerated only by `scripts/generate-certificate-fixtures.ts`, which refuses
-to write if the issued certificates or stripped lists differ from the
-hand-written expectations in it. The claim rules in `login-certificate.ts`
-(printable-ASCII, not-all-digit keys; safe integers; no floats) exist because
-those are exactly the places PHP and JavaScript would canonicalise differently.
-
-The certificate token is a SHA-256, not a signature, and the docs say so. It is
-also not WebAuthn work: it runs after the ceremony has verified.
-
-## Commands
+## Install
 
 ```bash
-npm install
-npm test       # vitest
-npm run lint   # tsc --noEmit && eslint .
-npm run build  # tsup
+npm install @particle-academy/fancy-passkeys @simplewebauthn/server
 ```
 
-## Conventions
+- The npm name is `@particle-academy/fancy-passkeys` (the repo is
+  `fancy-passkeys-js`). The PHP twin is the Composer package
+  `particle-academy/fancy-passkeys`.
+- **Peer:** `@simplewebauthn/server >=13.3.0 <15`. Install it yourself; it is
+  never bundled.
+- **Node:** `>=22`. ESM and CJS, types included.
+- **Browser side:** `@particle-academy/fancy-passkeys-ui` (or
+  `@simplewebauthn/browser`) runs the ceremony.
 
-- **Tests cover failure paths first.** Auth code with only a happy-path test is
-  untested code: the happy path is what an attacker never uses. Required
-  coverage: replayed challenge, expired challenge, ceremony-type mismatch,
-  wrong origin, counter regression, unknown credential, cross-user credential
-  reuse.
-- **No error message leaks whether a credential exists.** `unknown_credential`
-  and a bad signature must be indistinguishable to the client.
-- Sibling first-party deps use `>=X <2.0`, never a caret on a `0.x`.
-  `devDependencies` keep their carets.
-- `CHANGELOG.md` is updated in the SAME commit as the change.
+## Find it on the Fancy MCP server
+
+The catalog server is `https://ui.particle.academy/mcp` (streamable HTTP, no API
+key; MCP id `fancy-ui`). This package's registry entry is `fancy-passkeys-js`.
+As a server-side package it is found with `search-backend-packages` (stack
+`node`); `install-instructions` gives the exact install commands. The UI is
+`@particle-academy/fancy-passkeys-ui` (entries `passkey-sign-in`,
+`passkey-manager`, `passkey-status`).
+
+## API essentials
+
+- **`new PasskeyServer({ relyingParty, challenges, credentials })`** with
+  `new RelyingParty({ id, name, origins })`.
+- **Registration** (on an already signed-in user):
+  `startRegistration({ handle, name, displayName })` returns `{ state, publicKey }`;
+  `finishRegistration({ state, response, name })`.
+- **Sign-in:** `startAuthentication()` (discoverable, no username) or
+  `startAuthentication({ userHandle })`; `finishAuthentication({ state, response })`
+  returns `{ userHandle, credential, summary }`. Sessions are yours.
+- **Manage:** `listPasskeys(handle)` returns `PasskeySummary[]`.
+- **Stores you implement:** `ChallengeStore` (`put`, `pull`) and
+  `CredentialStore` (`findById`, `findByUserHandle`, `save`,
+  `updateAfterAuthentication`, `flagCloned`, `delete`).
+  `InMemoryChallengeStore` / `InMemoryCredentialStore` are for tests and single
+  processes.
+- **HTTP:** `createPasskeyHandlers(server, { currentUser, resolveUserByEmail,
+  onAuthenticated })` from `/http` gives the four endpoints as plain
+  `(input) => Promise<{ status, body }>` functions; adapt them to Express, Hono
+  or anything else.
+- **Errors:** `PasskeyError` with a closed `code`, a 4xx `httpStatus`, `wireCode`,
+  and `toJSON()` for the wire body.
+- `origins` may be a function (sync or async), or swapped with
+  `rp.setOrigins(...)`. Login certificates are optional and off by default; see
+  the README.
+
+## Traps
+
+- **`ChallengeStore.pull` must delete as it reads.** That is the anti-replay
+  mechanism. Key by the opaque `state` handle, never by the challenge. Redis
+  `GETDEL` with a TTL fits.
+- **`InMemoryChallengeStore` is not shared between workers**; a ceremony started
+  on one and finished on another fails with `challenge_not_found`.
+- **`CredentialStore.save` must throw `PasskeyError.credentialAlreadyRegistered()`
+  on a duplicate id, and the column needs a `UNIQUE` index.** `findById` searches
+  across all users. Store everything as base64url text.
+- **The user handle is 32 random bytes, base64url**, minted by your app. Never
+  the primary key or the email.
+- **`origins` is an exact-match allow-list**, `https://` only except `localhost`
+  and `*.localhost`; never IP hosts; never derived from the request. The RP ID is
+  validated at boot.
+- **`counterPolicy: 'ignore'` disables clone detection.** The default `reject`
+  fails the login and stamps `clonedAt`.
+- **Three codes are redacted on the wire** (`unknown_credential`,
+  `user_handle_mismatch`, `counter_regressed` all send `verification_failed`).
+  Branch on `wireCode` for what the client sees; log `code`.
+- **`resolveUserByEmail` returns `null` for an unknown email; never throw.**
+- Sessions, CSRF and rate limiting are the host's. Attestation trust, passkey-only
+  signup and account recovery are out of scope.
+- **Desktop apps:** one user handle minted on first run, one credential per
+  device, RP ID `localhost` with a resolver for the port, discoverable sign-in.

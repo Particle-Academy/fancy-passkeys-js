@@ -30,6 +30,13 @@ It is the Node twin of `particle-academy/fancy-passkeys` (PHP). The two emit
 
 ---
 
+<!-- fancy-agents-note:start -->
+> **For agents.** This package is listed on the Fancy MCP catalog server at
+> `https://ui.particle.academy/mcp` (streamable HTTP, no API key; MCP id `fancy-ui`),
+> with install commands and docs, alongside the rest of the kit. How an agent
+> installs and uses this package is in [AGENTS.md](https://github.com/Particle-Academy/fancy-passkeys-js/blob/main/AGENTS.md).
+<!-- fancy-agents-note:end -->
+
 ## Install
 
 ```bash
@@ -602,18 +609,6 @@ shipping it.
   persists credentials; what a verified ceremony *means* is your call.
 
 ---
-
-## Development
-
-```bash
-npm install
-npm test       # vitest
-npm run lint   # tsc --noEmit && eslint .
-npm run build  # tsup
-```
-
-Tests cover failure paths first — auth code with only a happy-path test is
-untested code, because the happy path is the one an attacker never uses.
 
 ## Licence
 
