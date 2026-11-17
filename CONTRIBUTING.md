@@ -6,7 +6,7 @@ package is in [AGENTS.md](./AGENTS.md); what it is, is in [README.md](./README.m
 works in this repo.
 
 Passkey (WebAuthn) login for Node. Read the envelope's
-`AGENTS.md` too, and `.ai/plans/fancy-passkeys.md` — that plan is the wire
+`RULES.md` too, and `.ai/plans/fancy-passkeys.md` — that plan is the wire
 contract this package and its PHP twin are both held to.
 
 ## The rule that shapes this repo
